@@ -51,7 +51,7 @@ label{font-size:12px;color:#666;margin-bottom:4px;display:block}
 <script>
 // ============ CONFIG JSONBin ============
 const BIN_ID = "69fb4cfc36566621a830ede1";
-const API_KEY = "$2a$10$j.EvQYa3TiVfgAxZJWVcPeMvrKUWQ83egNT9ugRIUkk.HacoWpioe";
+const MASTER_KEY = "$2a$10$j.EvQYa3TiVfgAxZJWVcPeMvrKUWQ83egNT9ugRIUkk.HacoWpioe";
 const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
 // ========================================
 
@@ -89,7 +89,7 @@ function toast(msg){
 async function loadData(){
   syncStatus="loading"; render();
   try{
-    const r=await fetch(API_URL+"/latest",{headers:{"X-Access-Key":API_KEY}});
+    const r=await fetch(API_URL+"/latest",{headers:{"X-Master-Key":MASTER_KEY}});
     if(!r.ok) throw new Error(r.status);
     const d=await r.json();
     issues=d.record.issues||[];
@@ -101,7 +101,7 @@ async function loadData(){
 async function saveData(){
   syncStatus="loading";render();
   try{
-    const r=await fetch(API_URL,{method:"PUT",headers:{"Content-Type":"application/json","X-Access-Key":API_KEY},body:JSON.stringify({issues})});
+    const r=await fetch(API_URL,{method:"PUT",headers:{"Content-Type":"application/json","X-Master-Key":MASTER_KEY},body:JSON.stringify({issues})});
     if(!r.ok) throw new Error(r.status);
     syncStatus="ok";
   }catch(e){console.error("Save error",e);syncStatus="err";toast("Erreur sauvegarde ⚠️");}
