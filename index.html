@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐛 Bug Tracker — Staging Wedivorce</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f5f5f5;color:#1a1a2e;padding:16px}
+.container{max-width:860px;margin:0 auto}
+button{cursor:pointer}
+.btn{border:none;border-radius:8px;padding:10px 18px;font-weight:600;font-size:14px;cursor:pointer}
+.btn-s{padding:8px 16px;font-size:13px}
+input,textarea,select{padding:10px 12px;border-radius:8px;border:1px solid #ddd;font-size:14px;font-family:inherit;width:100%;box-sizing:border-box}
+textarea{resize:vertical}
+.tag{font-size:10px;padding:2px 8px;border-radius:12px;font-weight:600;display:inline-block}
+.pill{font-size:11px;padding:5px 10px;border-radius:20px;border:1px solid #ddd;background:#fff;cursor:pointer}
+.pill.active{border:2px solid #4361ee;background:#eef0ff;font-weight:600}
+.pill-vue.active{border-color:#8b5cf6;background:#f3f0ff}
+.card{background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #e8e8e8;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:8px}
+.counter-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
+.counter{background:#fff;border-radius:8px;padding:10px 12px;text-align:center}
+.counter .val{font-size:22px;font-weight:700}
+.counter .lbl{font-size:11px;color:#666}
+.form-box{background:#f8f9fa;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #e0e0e0}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.col{flex:1;min-width:150px}
+label{font-size:12px;color:#666;margin-bottom:4px;display:block}
+.paste-zone{border:2px dashed #ccc;border-radius:8px;padding:16px;text-align:center;background:#fff;min-height:60px;outline:none;transition:border-color .2s}
+.paste-zone:focus{border-color:#4361ee}
+.toast{position:fixed;top:16px;right:16px;background:#1a1a2e;color:#fff;padding:10px 20px;border-radius:8px;z-index:999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,.2);display:none}
+.toast.show{display:block}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;cursor:zoom-out;padding:20px}
+.lightbox img{max-width:90%;max-height:90%;border-radius:8px}
+.export-panel{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:16px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.empty{text-align:center;padding:40px;color:#999}
+.sync-bar{display:flex;gap:8px;align-items:center;margin-top:4px}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.ok{background:#10b981}
+.status-dot.err{background:#ef4444}
+.status-dot.loading{background:#f59e0b;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.screenshot-thumb{position:relative;display:inline-block}
+.screenshot-thumb img{height:80px;border-radius:6px;border:1px solid #ddd;cursor:pointer}
+.screenshot-thumb .del{position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;display:flex;align-items:center;justify-content:center;line-height:1}
+</style>
+</head>
+<body>
+<div class="container" id="app"></div>
+
+<script>
+// ============ CONFIG JSONBin ============
+const BIN_ID = "69fb4cfc36566621a830ede1";
+const API_KEY = "$2a$10$j.EvQYa3TiVfgAxZJWVcPeMvrKUWQ83egNT9ugRIUkk.HacoWpioe";
+const API_URL = `https://api.jsonbin.io/v3/b/${BIN_ID}`;
+// ========================================
+
+const STATUTS = ["🆕 Nouveau","🔄 En cours","✅ Résolu","❌ Won't fix"];
+const PRIORITES = ["🔴 Critique","🟠 Majeur","🟡 Mineur"];
+const VUES = ["👑 Admin","👔 Gestionnaire","👤 Client"];
+
+let issues = [];
+let filter = "Tous";
+let filterVue = "Toutes";
+let search = "";
+let showForm = false;
+let editId = null;
+let showExport = false;
+let formData = {};
+let formScreenshots = [];
+let expandedId = null;
+let lightboxSrc = null;
+let syncStatus = "loading"; // ok, err, loading
+
+const $ = s => document.querySelector(s);
+const genId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const fmtDate = d => new Date(d).toLocaleDateString("fr-FR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const vueColor = v => v===VUES[0]?"#8b5cf6":v===VUES[1]?"#0ea5e9":"#f59e0b";
+const stripEmoji = s => s.replace(/[^\w\sÀ-ÿ]/g,"").trim();
+
+let toastTimer;
+function toast(msg){
+  const t=$("#toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.classList.remove("show"),2500);
+}
+
+// ============ JSONBin API ============
+async function loadData(){
+  syncStatus="loading"; render();
+  try{
+    const r=await fetch(API_URL+"/latest",{headers:{"X-Access-Key":API_KEY}});
+    if(!r.ok) throw new Error(r.status);
+    const d=await r.json();
+    issues=d.record.issues||[];
+    syncStatus="ok";
+  }catch(e){console.error("Load error",e);syncStatus="err";toast("Erreur chargement ⚠️");}
+  render();
+}
+
+async function saveData(){
+  syncStatus="loading";render();
+  try{
+    const r=await fetch(API_URL,{method:"PUT",headers:{"Content-Type":"application/json","X-Access-Key":API_KEY},body:JSON.stringify({issues})});
+    if(!r.ok) throw new Error(r.status);
+    syncStatus="ok";
+  }catch(e){console.error("Save error",e);syncStatus="err";toast("Erreur sauvegarde ⚠️");}
+  render();
+}
+
+// ============ ACTIONS ============
+function resetForm(){formData={};formScreenshots=[];editId=null;showForm=false;}
+
+function addIssue(){
+  if(!formData.title?.trim()) return;
+  const now=new Date().toISOString();
+  if(editId){
+    issues=issues.map(i=>i.id===editId?{...i,title:formData.title.trim(),description:(formData.description||"").trim(),etape:(formData.etape||"").trim(),vue:formData.vue||VUES[2],statut:formData.statut||STATUTS[0],priorite:formData.priorite||PRIORITES[1],screenshots:formScreenshots,updatedAt:now}:i);
+    toast("Mis à jour ✅");
+  }else{
+    issues.unshift({id:genId(),title:formData.title.trim(),description:(formData.description||"").trim(),etape:(formData.etape||"").trim(),vue:formData.vue||VUES[2],statut:formData.statut||STATUTS[0],priorite:formData.priorite||PRIORITES[1],screenshots:formScreenshots,createdAt:now,updatedAt:now});
+    toast("Ajouté ✅");
+  }
+  resetForm();saveData();
+}
+
+function startEdit(issue){
+  formData={title:issue.title,description:issue.description,etape:issue.etape||"",vue:issue.vue||VUES[2],statut:issue.statut,priorite:issue.priorite};
+  formScreenshots=[...(issue.screenshots||[])];editId=issue.id;showForm=true;render();
+}
+
+function deleteIssue(id){issues=issues.filter(i=>i.id!==id);toast("Supprimé 🗑️");saveData();}
+function quickStatus(id,s){issues=issues.map(i=>i.id===id?{...i,statut:s,updatedAt:new Date().toISOString()}:i);saveData();}
+function clearAll(){if(!confirm("Supprimer TOUS les problèmes ? Irréversible.")) return;issues=[];saveData();toast("Tout supprimé 🗑️");}
+
+// ============ EXPORT ============
+function generateCSV(){
+  if(!issues.length) return "";
+  const h=["#","Titre","Description","Vue","Étape","Statut","Priorité","Captures","Créé le","Mis à jour le"];
+  const e=v=>`"${String(v).replace(/"/g,'""')}"`;
+  const rows=issues.map((i,idx)=>[idx+1,i.title,i.description,stripEmoji(i.vue||""),i.etape||"",stripEmoji(i.statut),stripEmoji(i.priorite),(i.screenshots||[]).length+" capture(s)",fmtDate(i.createdAt),fmtDate(i.updatedAt)].map(e).join(";"));
+  return"\uFEFF"+h.map(e).join(";")+"\n"+rows.join("\n");
+}
+
+function downloadCSV(){
+  const csv=generateCSV();if(!csv){toast("Rien à exporter");return;}
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8;"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=`bugs_staging_${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);a.click();document.body.removeChild(a);
+  toast("CSV téléchargé 📥");showExport=false;render();
+}
+
+function copyCSV(){
+  const csv=generateCSV();if(!csv){toast("Rien à exporter");return;}
+  navigator.clipboard.writeText(csv).then(()=>toast("CSV copié 📋")).catch(()=>toast("Erreur ⚠️"));
+}
+
+function copyJSON(){
+  if(!issues.length){toast("Rien à exporter");return;}
+  navigator.clipboard.writeText(JSON.stringify({issues},null,2)).then(()=>toast("JSON copié 📋")).catch(()=>toast("Erreur ⚠️"));
+}
+
+// ============ PASTE SCREENSHOTS ============
+function handlePaste(e){
+  const items=e.clipboardData?.items;if(!items) return;
+  for(let i=0;i<items.length;i++){
+    if(items[i].type.startsWith("image/")){
+      e.preventDefault();
+      const reader=new FileReader();
+      reader.onload=ev=>{formScreenshots.push({id:genId(),data:ev.target.result});toast("Capture ajoutée 📸");render();};
+      reader.readAsDataURL(items[i].getAsFile());break;
+    }
+  }
+}
+
+// ============ RENDER ============
+function render(){
+  const filtered=issues.filter(i=>{
+    const mf=filter==="Tous"||i.statut===filter;
+    const mv=filterVue==="Toutes"||i.vue===filterVue;
+    const ms=!search||i.title.toLowerCase().includes(search.toLowerCase())||i.description.toLowerCase().includes(search.toLowerCase())||(i.etape||"").toLowerCase().includes(search.toLowerCase());
+    return mf&&mv&&ms;
+  });
+  const counts={total:issues.length,nouveau:issues.filter(i=>i.statut===STATUTS[0]).length,encours:issues.filter(i=>i.statut===STATUTS[1]).length,resolu:issues.filter(i=>i.statut===STATUTS[2]).length};
+  const statusDot=`<span class="status-dot ${syncStatus}"></span><span style="font-size:11px;color:#888">${syncStatus==="ok"?"Synchro OK":syncStatus==="loading"?"Synchro...":"Erreur synchro"}</span>`;
+
+  let html=`<div id="toast" class="toast"></div>`;
+  if(lightboxSrc) html+=`<div class="lightbox" onclick="lightboxSrc=null;render()"><img src="${lightboxSrc}"></div>`;
+
+  // Header
+  html+=`<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:20px">
+    <div><h1 style="font-size:22px">🐛 Bug Tracker — Staging</h1>
+    <div class="sync-bar"><span style="font-size:13px;color:#666">Procédure Wedivorce</span>${statusDot}</div></div>
+    <div class="row">
+      <button class="btn" style="background:#4361ee;color:#fff" onclick="resetForm();showForm=true;render()">+ Ajouter</button>
+      <button class="btn" style="background:#0d9488;color:#fff" onclick="showExport=!showExport;render()">📥 Exporter</button>
+      <button class="btn" style="background:none;border:none;font-size:18px" onclick="loadData()" title="Rafraîchir">🔄</button>
+      ${issues.length?`<button class="btn" style="background:#fee2e2;color:#dc2626;font-size:12px;padding:10px 14px" onclick="clearAll()">🗑️ Vider</button>`:""}</div></div>`;
+
+  // Export panel
+  if(showExport) html+=`<div class="export-panel">
+    <span style="font-size:14px;font-weight:600;color:#166534">Exporter ${issues.length} bug(s) :</span>
+    <button class="btn btn-s" style="background:#0d9488;color:#fff" onclick="downloadCSV()">⬇️ CSV</button>
+    <button class="btn btn-s" style="background:#4361ee;color:#fff" onclick="copyCSV()">📋 Copier CSV</button>
+    <button class="btn btn-s" style="background:#8b5cf6;color:#fff" onclick="copyJSON()">🔧 Copier JSON</button>
+    <button style="background:none;border:none;font-size:16px;cursor:pointer" onclick="showExport=false;render()">✕</button></div>`;
+
+  // Counters
+  html+=`<div class="counter-grid">
+    ${[{l:"Total",v:counts.total,c:"#4361ee"},{l:"Nouveaux",v:counts.nouveau,c:"#ef4444"},{l:"En cours",v:counts.encours,c:"#f59e0b"},{l:"Résolus",v:counts.resolu,c:"#10b981"}].map(x=>`<div class="counter" style="border-left:4px solid ${x.c}"><div class="val" style="color:${x.c}">${x.v}</div><div class="lbl">${x.l}</div></div>`).join("")}</div>`;
+
+  // Filters
+  html+=`<div style="margin-bottom:8px"><input placeholder="🔍 Rechercher..." value="${esc(search)}" oninput="search=this.value;render()" style="max-width:300px"></div>`;
+  html+=`<div class="row" style="gap:4px;margin-bottom:6px">${["Tous",...STATUTS].map(s=>`<button class="pill ${filter===s?"active":""}" onclick="filter='${s}';render()">${s}</button>`).join("")}</div>`;
+  html+=`<div class="row" style="gap:4px;margin-bottom:16px">${["Toutes",...VUES].map(v=>`<button class="pill pill-vue ${filterVue===v?"active":""}" onclick="filterVue='${v}';render()">${v==="Toutes"?"🖥️ Toutes vues":v}</button>`).join("")}</div>`;
+
+  // Form
+  if(showForm){
+    const fd=formData;
+    html+=`<div class="form-box">
+      <h3 style="margin-bottom:12px;font-size:16px">${editId?"✏️ Modifier":"➕ Nouveau problème"}</h3>
+      <input placeholder="Titre du problème *" value="${esc(fd.title||"")}" oninput="formData.title=this.value" style="margin-bottom:8px">
+      <textarea placeholder="Description (étapes pour reproduire, comportement attendu vs observé...)" rows="3" oninput="formData.description=this.value" style="margin-bottom:8px">${esc(fd.description||"")}</textarea>
+      <div class="row" style="margin-bottom:8px">
+        <div class="col"><label>Vue concernée</label><select onchange="formData.vue=this.value">${VUES.map(v=>`<option ${(fd.vue||VUES[2])===v?"selected":""}>${v}</option>`).join("")}</select></div>
+        <div class="col"><label>Étape de la procédure</label><input placeholder="Ex: Signature convention, Requête..." value="${esc(fd.etape||"")}" oninput="formData.etape=this.value"></div>
+      </div>
+      <div class="row" style="margin-bottom:12px">
+        <div class="col"><label>Statut</label><select onchange="formData.statut=this.value">${STATUTS.map(s=>`<option ${(fd.statut||STATUTS[0])===s?"selected":""}>${s}</option>`).join("")}</select></div>
+        <div class="col"><label>Priorité</label><select onchange="formData.priorite=this.value">${PRIORITES.map(p=>`<option ${(fd.priorite||PRIORITES[1])===p?"selected":""}>${p}</option>`).join("")}</select></div>
+      </div>
+      <div style="margin-bottom:12px"><label>📸 Captures d'écran (Ctrl+V pour coller)</label>
+        <div class="paste-zone" tabindex="0" onpaste="handlePaste(event)">
+          ${formScreenshots.length===0?`<span style="color:#aaa;font-size:13px">Cliquez ici puis collez vos captures (Ctrl+V)</span>`:
+          `<div class="row" style="gap:8px;justify-content:center">${formScreenshots.map(s=>`<div class="screenshot-thumb"><img src="${s.data}" onclick="lightboxSrc='${s.data}';render()"><button class="del" onclick="event.stopPropagation();formScreenshots=formScreenshots.filter(x=>x.id!=='${s.id}');render()">×</button></div>`).join("")}</div>`}
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn" style="background:#4361ee;color:#fff" onclick="addIssue()">${editId?"Mettre à jour":"Ajouter"}</button>
+        <button class="btn" style="background:#e0e0e0;color:#333" onclick="resetForm();render()">Annuler</button>
+      </div></div>`;
+  }
+
+  // Issues list
+  if(!filtered.length){
+    html+=`<div class="empty"><div style="font-size:40px;margin-bottom:8px">🎉</div><div style="font-size:15px">${!issues.length?"Aucun problème — commence tes tests !":"Aucun résultat pour ce filtre"}</div></div>`;
+  }else{
+    filtered.forEach(issue=>{
+      const isOpen=expandedId===issue.id;
+      const sc=issue.screenshots||[];
+      const vc=vueColor(issue.vue);
+      html+=`<div class="card" style="border-left:4px solid ${vc}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="flex:1;cursor:pointer" onclick="expandedId=expandedId==='${issue.id}'?null:'${issue.id}';render()">
+            <div class="row" style="gap:6px;align-items:center;margin-bottom:4px">
+              <span style="font-weight:600;font-size:15px">${esc(issue.title)}</span>
+              <span class="tag" style="background:${vc}20;color:${vc}">${issue.vue}</span>
+              <span class="tag" style="background:#f0f0f0">${issue.priorite}</span>
+              ${sc.length?`<span class="tag" style="background:#fef3c7">📸 ${sc.length}</span>`:""}
+            </div>
+            ${issue.etape?`<div style="font-size:12px;color:#888">📍 ${esc(issue.etape)}</div>`:""}
+          </div>
+          <div style="display:flex;gap:4px;flex-shrink:0">
+            <button style="background:none;border:none;font-size:16px;padding:4px;cursor:pointer" onclick="startEdit(issues.find(i=>i.id==='${issue.id}'))">✏️</button>
+            <button style="background:none;border:none;font-size:16px;padding:4px;cursor:pointer" onclick="deleteIssue('${issue.id}')">🗑️</button>
+          </div>
+        </div>`;
+      if(isOpen){
+        html+=`<div style="margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0">`;
+        if(issue.description) html+=`<p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.5;white-space:pre-wrap">${esc(issue.description)}</p>`;
+        if(sc.length) html+=`<div class="row" style="gap:8px;margin-bottom:8px">${sc.map(s=>`<img src="${s.data}" style="height:100px;border-radius:6px;border:1px solid #ddd;cursor:pointer" onclick="lightboxSrc='${s.data}';render()">`).join("")}</div>`;
+        html+=`</div>`;
+      }
+      html+=`<div class="row" style="gap:4px;align-items:center;margin-top:8px">${STATUTS.map(s=>`<button style="font-size:10px;padding:3px 8px;border-radius:12px;border:${issue.statut===s?"2px solid #4361ee":"1px solid #ddd"};background:${issue.statut===s?"#eef0ff":"#fff"};cursor:pointer;font-weight:${issue.statut===s?600:400}" onclick="quickStatus('${issue.id}','${s}')">${s}</button>`).join("")}</div>`;
+      html+=`<div style="font-size:11px;color:#aaa;margin-top:6px">Créé : ${fmtDate(issue.createdAt)} • Maj : ${fmtDate(issue.updatedAt)}</div></div>`;
+    });
+  }
+
+  $("#app").innerHTML=html;
+}
+
+// ============ INIT ============
+loadData();
+</script>
+</body>
+</html>
